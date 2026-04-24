@@ -119,8 +119,4 @@ Shows the processor reading I/O, storing a value, and toggling it with OR/AND lo
 
 ---
 
-## Why this feels like a real processor
-
-A mod-N counter is hardwired logic — you cannot make it do anything else without redesigning the circuit.
-
 This processor runs **three completely different algorithms** (step counting, Fibonacci, XOR toggling) on the **exact same hardware**, selected purely by the program in memory. The silicon does not change. The program does. That is the definition of a stored-program processor.

@@ -9,13 +9,13 @@ module lipsi_alu (
     always @(*) begin
         carry_out = 0;
         case (func)
-            3'b000: {carry_out, result} = a + operand;           // add
-            3'b001: {carry_out, result} = a - operand;           // sub
+            3'b000: {carry_out, result} = a + operand;
+            3'b001: {carry_out, result} = a - operand;
 
-            3'b100: result = a & operand;                        // and
-            3'b101: result = a | operand;                        // or
-            3'b110: result = a ^ operand;                        // xor
-            3'b111: result = a;                                  // load
+            3'b100: result = a & operand;
+            3'b101: result = a | operand;
+            3'b110: result = a ^ operand;
+            3'b111: result = a;
         endcase
     end
 endmodule

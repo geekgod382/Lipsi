@@ -12,13 +12,11 @@ module lipsi (
     reg [1:0] state;
     reg [2:0] alu_func;
 
-    // States
     localparam FETCH   = 2'b00;
     localparam EXECUTE = 2'b01;
     localparam FETCH2  = 2'b10;
     localparam EXEC2   = 2'b11;
 
-    // Memory signals
     reg mem_we;
     reg [7:0] mem_rd_addr, mem_wr_addr, mem_wr_data;
     wire [7:0] mem_rd_data;
@@ -29,7 +27,6 @@ module lipsi (
         .wr_data(mem_wr_data), .rd_data(mem_rd_data)
     );
 
-    // ALU signals
     wire [7:0] alu_result;
     wire alu_carry;
 
@@ -58,32 +55,27 @@ module lipsi (
             mem_rd_addr <= PC;
             instr <= 8'h00;
         end else begin
-            mem_we <= 1'b0; // default: no write
+            mem_we <= 1'b0;
 
             case (state)
 
-                // ── CYCLE 1: send PC to memory, increment PC ──────────────
+
                 FETCH: begin
                     mem_rd_addr <= PC;
                     PC          <= PC + 1;
                     state       <= EXECUTE;
                 end
 
-                // ── CYCLE 2: instruction arrives from memory ──────────────
                 EXECUTE: begin
-                    instr <= mem_rd_data; // latch instruction
+                    instr <= mem_rd_data;
                     casez (mem_rd_data)
 
-                        // ALU with register operand: A = A f mem[r]
-                        // Encoding: 0fff rrrr
                         8'b0???_????: begin
                             alu_func    <= mem_rd_data[6:4];
                             mem_rd_addr <= {4'b1000, mem_rd_data[3:0]};
-                            state       <= EXEC2; // wait for register read
+                            state       <= EXEC2;
                         end
 
-                        // Store A into register: mem[r] = A
-                        // Encoding: 1000 rrrr
                         8'b1000_????: begin
                             mem_we      <= 1'b1;
                             mem_wr_addr <= {4'b1000, mem_rd_data[3:0]};
@@ -91,46 +83,36 @@ module lipsi (
                             state       <= FETCH;
                         end
 
-                        // ALU immediate (2-byte): A = A f n
-                        // Encoding: 1100 -fff | nnnn nnnn
                         8'b1100_????: begin
                             alu_func    <= mem_rd_data[2:0];
-                            mem_rd_addr <= PC;      // fetch immediate byte
+                            mem_rd_addr <= PC;
                             PC          <= PC + 1;
                             state       <= EXEC2;
                         end
 
-                        // Unconditional branch: PC = addr
-                        // Encoding: 1101 --00 | aaaa aaaa
                         8'b1101_??00: begin
-                            mem_rd_addr <= PC;      // fetch target address
+                            mem_rd_addr <= PC;
                             PC          <= PC + 1;
                             state       <= EXEC2;
                         end
 
-                        // Branch if zero: if A==0, PC = addr
-                        // Encoding: 1101 --10 | aaaa aaaa
                         8'b1101_??10: begin
                             mem_rd_addr <= PC;
                             PC          <= PC + 1;
                             state       <= EXEC2;
                         end
 
-                        // Branch if not zero: if A!=0, PC = addr
-                        // Encoding: 1101 --11 | aaaa aaaa
                         8'b1101_??11: begin
                             mem_rd_addr <= PC;
                             PC          <= PC + 1;
                             state       <= EXEC2;
                         end
 
-                        // IO: read input into A / write A to output
-                        // Encoding: 1111 aaaa
                         8'b1111_????: begin
                             if (mem_rd_data[3:0] == 4'h0)
-                                A <= io_in;         // read switches
+                                A <= io_in;
                             else
-                                io_out <= A;        // write to LEDs
+                                io_out <= A;
                             state <= FETCH;
                         end
 
@@ -138,38 +120,32 @@ module lipsi (
                     endcase
                 end
 
-                // ── CYCLE 3: second byte / register data arrives ──────────
                 EXEC2: begin
                     casez (instr)
 
-                        // ALU register: apply ALU now that register data is ready
                         8'b0???_????: begin
                             A           <= alu_result;
                             carry       <= alu_carry;
                             state       <= FETCH;
                         end
 
-                        // ALU immediate: second byte is the immediate value
                         8'b1100_????: begin
                             A           <= alu_result;
                             carry       <= alu_carry;
                             state       <= FETCH;
                         end
 
-                        // Unconditional branch
                         8'b1101_??00: begin
                             PC    <= mem_rd_data;
                             state <= FETCH;
                         end
 
-                        // Branch if zero
                         8'b1101_??10: begin
                             if (A == 8'h00)
                                 PC <= mem_rd_data;
                             state <= FETCH;
                         end
 
-                        // Branch if not zero
                         8'b1101_??11: begin
                             if (A != 8'h00)
                                 PC <= mem_rd_data;

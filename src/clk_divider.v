@@ -1,6 +1,3 @@
-// Clock divider — parameterised half-period
-// Default: 100 MHz → 1 Hz  (HALF_PERIOD = 49_999_999)
-// For simulation set HALF_PERIOD = 1
 module clk_div #(
     parameter [26:0] HALF_PERIOD = 27'd49_999_999
 ) (
