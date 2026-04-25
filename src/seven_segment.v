@@ -23,6 +23,9 @@ module seven_seg (
             2'b01: begin an = 4'b1101; digit = 4'h0;  end
             2'b10: begin an = 4'b1011; digit = val[7:4]; end
             2'b11: begin an = 4'b0111; digit = val[3:0]; end
+        endcase
+    end
+
     always @(*) begin
         case (digit)
             4'h0: seg = 7'b1000000;
