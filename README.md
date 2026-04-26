@@ -60,7 +60,7 @@ Display: 01 → 01 → 02 → 03 → 05 → 08 → 0D → 15 → 22 → …
 
 Uses three registers (r0=prev, r1=curr, r2=next), demonstrating **register file operations**, **addition**, and **conditional branch** (BZ to restart on overflow).
 
-### Mode 3 — XOR Toggle `SW0=0, SW1=0` (default)
+### Mode 3 — beep pattern `SW0=0, SW1=0` (default)
 
 Set SW7–SW2 to any pattern.
 
