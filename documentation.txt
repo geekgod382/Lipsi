@@ -1,0 +1,341 @@
+================================================================================
+LIPSI PROJECT - EXTRACTED DOCUMENTATION & COMMENTS
+================================================================================
+
+
+================================================================================
+memory.v - Lipsi Memory (5-mode demo with baked-in programs)
+================================================================================
+
+Lipsi Memory — 5-mode demo (baked in, no .hex file)
+
+SWITCH LAYOUT:
+  SW15  SW14  SW13  → Mode
+   0     0     0   → Mode 3: beep pattern    (default)
+   0     0     1   → Mode 1: Step Counter
+   0     1     0   → Mode 2: Fibonacci
+   1     0     0   → Mode 4: Hello World   (needs PuTTY)
+   1     0     1   → Mode 5: Echo          (needs PuTTY)
+
+  SW7-SW0 = data input (step size for M1, XOR mask for M3)
+
+BUTTONS:
+  BTNC = full reset (re-reads switches, picks mode)
+  BTNU = soft reset (clears accumulator only)
+
+PUTTY SETTINGS (for Mode 4 and 5):
+  Connection: Serial, Speed: 9600
+  Data bits: 8, Stop bits: 1, Parity: None, Flow: None
+
+IO OPCODES:
+  F0 → A = SW7-SW0          (data switches)
+  F1 → io_out = A           (LEDs + 7-seg)
+  F2 → A = {00000,SW15,SW14,SW13}  (mode switches)
+  F3 → UART TX: send byte A
+  F4 → A = last UART RX byte (0 if nothing received)
+  F5 → A = UART TX busy flag (0=ready, 1=busy)
+
+FINAL MEMORY MAP (no overlaps, verified):
+  0x00–0x17  Dispatcher         (24 bytes)
+  0x18–0x25  Mode 1: Step Counter   (14 bytes)
+  0x26–0x40  Mode 2: Fibonacci      (27 bytes)
+  0x42–0x4C  Mode 3: beep pattern     (11 bytes)
+  0x4D–0x7E  Mode 4: Hello World    (50 bytes — with UART busy-wait checks)
+  0x7A–0x7F  Mode 5: Echo           (6 bytes)
+  0x85–0x9F  Data region            (reserved for data if needed)
+
+REGISTER USAGE:
+  r0 (0x80) = counter / fib_prev
+  r1 (0x81) = fib_curr
+  r2 (0x82) = fib_next
+  r3 (0x83) = step / mask / delay counter
+
+DISPATCHER  (0x00 – 0x17):
+  Priority order:
+  1. SW15+SW13 both set → Mode 5 (Echo)
+  2. SW13 set           → Mode 1 (Step Counter)
+  3. SW14 set           → Mode 2 (Fibonacci)
+  4. SW15 set           → Mode 4 (Hello World)
+  5. default            → Mode 3 (beep pattern)
+
+  Mode5 check: A = mode_in & 0x05; A = A - 5; BZ → M5
+  (A==0 only when both bit2=SW15 and bit0=SW13 are set)
+
+MODE 1 — STEP COUNTER  (0x18 – 0x25):
+  SW7-SW0 = step size stored in r3
+  r0 = running counter, starts at 0
+  Loop: r0 += r3, display r0
+
+  Init:
+    F0       A = data switches (step)
+    83       r3 = step
+    C4 00    A = 0
+    80       r0 = 0
+  Loop @ 0x1D:
+    C4 00    A = 0
+    50       A = A | r0  (load r0, func=OR=101, reg=0 → 0x50)
+    03       A = A + r3  (ADD reg, func=000, reg=3 → 0x03)
+    80       r0 = A
+    F1       display
+    D0 1D    JMP loop
+
+MODE 2 — FIBONACCI  (0x26 – 0x40):
+  r0=prev(0), r1=curr(1), r2=next
+  Display curr each tick, restart on 256-overflow
+
+  Init:
+    C4 00   A = 0
+    80      r0 = 0
+    C0 01   A = 1
+    81      r1 = 1
+  Loop @ 0x2C:
+    C4 00   A = 0
+    51      A = r1 (curr)
+    F1      display
+    C4 00   A = 0
+    50      A = r0 (prev)
+    01      A = A + r1 (next = prev+curr)
+    82      r2 = next
+    C4 00   A = 0
+    51      A = r1 (curr)
+    80      r0 = curr (prev = curr)
+    C4 00   A = 0
+    52      A = r2 (next)
+    81      r1 = next (curr = next)
+    D2 26   BZ → restart (overflowed)
+    D0 2C   JMP loop
+
+MODE 3 — beep pattern  (0x42 – 0x4C):
+  Display mode switches (mask), then display 0, then loop
+
+MODE 4 — HELLO WORLD  (0x4D – 0x7E):
+  Prints "Hello!" via UART once, then halts
+  Each character has a UART busy-wait before sending
+  Characters: H(48) e(65) l(6C) l(6C) o(6F) !(21) \r(0D) \n(0A)
+  
+  Pattern for each character:
+    F5          A = UART busy flag (wait if busy)
+    D3 [addr]   BNZ wait (loop while busy)
+    C0 [char]   A = char ASCII code
+    F3          UART send
+  
+  Then HALT — JMP to self (infinite loop on self)
+
+MODE 5 — ECHO  (0x7A – 0x7F):
+  Polls UART RX latch (F4). If 0, nothing received yet.
+  If non-zero, a byte arrived — echo it back via F3.
+  Then loop.
+
+  The top_level rx_latch holds the last received byte.
+  It updates whenever a new byte arrives from PuTTY.
+  CPU polls at 4Hz — fine for interactive typing.
+
+  loop @ 0x7A:
+    F4       A = rx_latch
+    D2 7A    BZ loop (nothing yet)
+    F3       UART send A (echo)
+    D0 7A    JMP loop
+
+
+================================================================================
+lipsi.v - Main Processor Core
+================================================================================
+
+Lipsi CPU Core
+
+IO opcode map:
+  F0 → A = io_in        (read data switches SW7-SW0)
+  F1 → io_out = A       (write to LEDs + 7-seg)
+  F2 → A = mode_in      (read mode switches SW15-SW13)
+  F3 → uart_tx_send = A (send byte over UART)
+  F4 → A = uart_rx_data (read last received UART byte)
+  F5 → A = uart_tx_busy (0=ready to send, 1=busy)
+
+States:
+  FETCH   (fetch instruction from memory)
+  EXECUTE (execute instruction)
+  FETCH2  (fetch second byte of 2-byte instruction)
+
+Memory signals:
+  mem_we, mem_rd_addr, mem_wr_addr, mem_wr_data, mem_rd_data
+
+ALU signals:
+  alu_func, alu_result, alu_carry
+
+Instruction execution:
+  CYCLE 1: send PC to memory, increment PC
+  CYCLE 2: instruction arrives from memory
+
+Instruction formats:
+  ALU with register operand: A = A f mem[r]
+  Encoding: 0fff rrrr
+
+  Store A into register: mem[r] = A
+  Encoding: 1000 rrrr
+
+  ALU immediate (2-byte): A = A f n
+  First byte: 1100 -fff
+  Second byte: nn (operand)
+
+  Jump instructions:
+  JMP: 1101 --00 | aa
+  BZ:  1101 --10 | aa  (branch if zero)
+  BNZ: 1101 --11 | aa  (branch if not zero)
+
+  IO instructions: 1111 xxxx
+
+
+================================================================================
+ALU.v - Arithmetic Logic Unit
+================================================================================
+
+Operations supported:
+  add  (func = 000)
+  sub  (func = 001)
+  and  (func = 100)
+  or   (func = 101)
+  xor  (func = 110)
+  load (func = 111)
+
+
+================================================================================
+clk_divider.v - Clock Divider Module
+================================================================================
+
+Clock divider — parameterised half-period
+Default: 100 MHz → 1 Hz  (HALF_PERIOD = 49_999_999)
+For simulation set HALF_PERIOD = 1
+
+
+================================================================================
+uart_tx.v - UART Transmitter
+================================================================================
+
+UART Transmitter — 9600 baud, 8N1
+(8 data bits, No parity, 1 stop bit)
+
+Usage:
+  1. Put byte on `tx_data`, pulse `tx_start` HIGH for 1 clk
+  2. `tx_busy` goes HIGH immediately
+  3. Wait for `tx_busy` to go LOW — byte has been sent
+  4. Repeat
+
+Timing (100 MHz clock, 9600 baud):
+  Clocks per bit = 100_000_000 / 9600 = 10416
+
+States:
+  IDLE: waiting for tx_start
+  START: start bit (LOW for 1 bit period)
+  DATA: 8 data bits (LSB first)
+  STOP: stop bit (HIGH for 1 bit period)
+
+Frame format: START(0) + DATA[7:0] + STOP(1)
+
+
+================================================================================
+uart_rx.v - UART Receiver
+================================================================================
+
+UART Receiver — 9600 baud, 8N1
+
+Samples the RX line in the middle of each bit period for
+maximum noise immunity.
+
+Usage:
+  - `rx_ready` pulses HIGH for exactly 1 clock when a
+    complete byte has been received
+  - Read `rx_data` the same cycle `rx_ready` is HIGH
+  - (CPU should store it in a register immediately)
+
+Timing: 100 MHz clock, 9600 baud → 10416 clocks per bit
+Sample point: middle of bit = 10416/2 = 5208 clocks in
+
+States:
+  IDLE: waiting for start bit (falling edge: HIGH → LOW)
+  START: verify start bit at midpoint
+  DATA: sample 8 data bits at midpoint of each bit
+  STOP: wait for stop bit then signal ready
+
+Features:
+  - Two-stage synchroniser on RX input (handles metastability)
+  - Detects falling edge for start bit
+  - Confirms start bit at midpoint (noise immunity)
+  - Samples data bits at midpoint
+  - Data is received LSB first
+
+
+================================================================================
+seven_segment.v - 7-Segment Display Driver
+================================================================================
+
+7-segment display with 4-digit refresh cycling
+Displays 2 digits of the 8-bit value (upper 4 bits, lower 4 bits)
+Displays 00 on the 2 leftmost digits (common behavior)
+
+Display positions:
+  Left 2 digits:   00 (always)
+  Right 2 digits:  value[7:4] and value[3:0]
+
+Segment encoding (active-low):
+  0=0x40, 1=0x79, 2=0x24, 3=0x30, 4=0x19, 5=0x12, 6=0x02, 7=0x78,
+  8=0x00, 9=0x10, A=0x08, B=0x03, C=0x46, D=0x21, E=0x06, F=0x0E
+
+
+================================================================================
+top_level_module.v - Lipsi Top-Level Integration
+================================================================================
+
+Lipsi Top-Level — Basys3
+
+Switch layout:
+  SW15, SW14, SW13  → mode select
+  SW7  – SW0        → 8-bit data input
+
+Mode select (set BEFORE pressing BTNC):
+  SW13=1            → Mode 1: Step Counter
+  SW14=1            → Mode 2: Fibonacci
+  SW15=1            → Mode 4: Hello World (UART)
+  SW15=1 + SW13=1   → Mode 5: Echo (UART)
+  all 0             → Mode 3: beep pattern (default)
+
+Buttons:
+  BTNC → full reset
+  BTNU → soft reset (clears accumulator)
+
+PuTTY settings for UART modes:
+  Connection type: Serial
+  Speed: 9600
+  Data bits: 8, Stop bits: 1, Parity: None
+
+CPU clock: 100 MHz → 4 Hz
+  At 4 Hz each instruction takes 250ms.
+  UART sends a byte in ~1ms at 9600 baud.
+  So the UART is always done long before the next F3.
+
+Mode input encoding (from switches):
+  mode_in & 0x01 → SW13 (Mode1)
+  mode_in & 0x02 → SW14 (Mode2)
+  mode_in & 0x04 → SW15 (Mode4)
+  mode_in & 0x05 → SW15+SW13 (Mode5)
+
+RX latch: holds last received byte until CPU reads it
+  F4 in lipsi.v reads uart_rx_data
+  Latch is written when rx_ready pulses
+  Latch holds until next byte arrives
+  CPU just polls F4; if 0 nothing received yet
+
+Module instantiations:
+  u_clkdiv:  Clock divider (4Hz)
+  u_cpu:     Lipsi main processor
+  u_uart_tx: UART transmitter on fast 100MHz clock
+  u_uart_rx: UART receiver on fast 100MHz clock
+  u_seg:     7-segment display driver
+
+Output mapping:
+  LED[7:0] = io_out
+  LED[15:8] = 0x00
+
+
+================================================================================
+END OF DOCUMENTATION
+================================================================================ 

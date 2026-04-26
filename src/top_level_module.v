@@ -1,4 +1,6 @@
-module lipsi_top (
+module lipsi_top #(
+    parameter [26:0] CPU_HALF_PERIOD = 27'd12_499_999
+) (
     input clk,
     input rst,
     input clr,
@@ -11,7 +13,7 @@ module lipsi_top (
 );
 
     wire clk_cpu;
-    clk_div #(.HALF_PERIOD(27'd12_499_999)) u_clkdiv (
+    clk_div #(.HALF_PERIOD(CPU_HALF_PERIOD)) u_clkdiv (
         .clk (clk),
         .rst (rst),
         .clk_slow(clk_cpu)
@@ -73,7 +75,7 @@ module lipsi_top (
         .rst (rst),
         .val (io_out),
         .seg (seg),
-        .an  (an)
+        .an (an)
     );
 
 endmodule

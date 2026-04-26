@@ -10,10 +10,10 @@ Lipsi is a minimal 8-bit processor with:
 - An **8-bit accumulator** (register A)
 - A **program counter** (PC)
 - A **carry flag**
+- **Full-duplex UART** (9600 baud) for serial communication with PuTTY
 - 256 bytes of unified memory (program + registers)
 - A simple **fetch → execute** pipeline (2–3 clock cycles per instruction)
-
-It is not a calculator. The hardware is fixed; behaviour comes entirely from the **program stored in memory**. Change the program, get completely different behaviour — that is what makes it a processor.
+- **Extended I/O**: 16 switches, 16 LEDs, 4-digit multiplexed 7-segment display
 
 ---
 
@@ -27,48 +27,16 @@ Lipsi/
 │   ├── memory.v             ← 256-byte memory + baked-in demo program
 │   ├── top_level_module.v   ← Basys3 top: clock divider + CPU + 7-seg
 │   ├── seven_segment.v      ← 4-digit multiplexed 7-segment driver
-│   └── clk_divider.v        ← Parameterised clock divider
+│   ├── clk_divider.v        ← Parameterised clock divider
+│   ├── uart_rx.v            ← UART receiver module
+│   └── uart_tx.v            ← UART transmitter module
 ├── lipsi.xdc                ← Basys3 pin constraints
+├── design.vvp               ← Simulation output file (you will get this after running the testbench)
+├── documentation.txt        ← Additional documentation
+├── lipsi_tb.v               ← Testbench for simulation
+├── lipsi_tb.vcd             ← Value change dump (simulation waveforms) (you will get this after running the GTKWave simulation)
 └── README.md
 ```
-
----
-
-## Demo Program — Three Modes
-
-The CPU runs a program baked into `memory.v`. **No `.hex` file needed.**  
-Set switches **before** pressing BTNC (reset) to select a mode.
-
-### Mode 1 — Step Counter `SW0=1`
-
-Set SW7–SW1 to any non-zero value = step size N.
-
-```
-Display: 00 → N → 2N → 3N → … → (wraps at 256) → 00 → …
-```
-
-Shows the ALU doing repeated addition using **register load/store** and **immediate add**.
-
-### Mode 2 — Fibonacci `SW1=1`
-
-No extra switches needed.
-
-```
-Display: 01 → 01 → 02 → 03 → 05 → 08 → 0D → 15 → 22 → …
-         (hex) wraps back to 01 after overflow past 255
-```
-
-Uses three registers (r0=prev, r1=curr, r2=next), demonstrating **register file operations**, **addition**, and **conditional branch** (BZ to restart on overflow).
-
-### Mode 3 — beep pattern `SW0=0, SW1=0` (default)
-
-Set SW7–SW2 to any pattern.
-
-```
-LEDs: [your pattern] → 00000000 → [your pattern] → 00000000 → …
-```
-
-Shows the processor reading I/O, storing a value, and toggling it with OR/AND logic in a loop.
 
 ---
 
@@ -77,46 +45,66 @@ Shows the processor reading I/O, storing a value, and toggling it with OR/AND lo
 | Button | Function |
 |--------|----------|
 | BTNC   | Full reset — restarts program from address 0x00 |
-| BTNU   | Soft reset — clears accumulator, keeps PC |
+| BTNU   | Soft reset (clr) — clears accumulator, keeps PC |
 
-| Switch | Function |
+| Switches | Function |
+|----------|----------|
+| SW0–SW7  | Input data / Mode selection (original switches) |
+| SW8–SW12 | Extended input data |
+| SW13–SW15 | Extended mode select bits |
+
+| Output | Function |
 |--------|----------|
-| SW0    | Mode select bit 0 |
-| SW1    | Mode select bit 1 |
-| SW7–SW2 | Step size (Mode 1) / XOR mask (Mode 3) |
+| LED0–LED7 | 8-bit accumulator display (original LEDs) |
+| LED8–LED15 | Extended output display |
+| 7-seg AN3–AN0 | 4-digit multiplexed 7-segment display |
+
+| Serial | Configuration |
+|--------|-----------------|
+| UART TX (A18) | FPGA → PC (9600 baud, 8N1) |
+| UART RX (B18) | PC → FPGA (9600 baud, 8N1) |
 
 ---
 
-## ISA Reference
+## Testing & Simulation
 
-| Encoding       | Mnemonic        | Operation                        |
-|----------------|-----------------|----------------------------------|
-| `F0`           | IN              | A ← io_in (switches)             |
-| `F1`           | OUT             | io_out ← A (LEDs + 7-seg)        |
-| `C0 nn`        | ADD #nn         | A ← A + nn                       |
-| `C1 nn`        | SUB #nn         | A ← A − nn                       |
-| `C4 nn`        | AND #nn         | A ← A & nn                       |
-| `C5 nn`        | OR  #nn         | A ← A \| nn                      |
-| `C6 nn`        | XOR #nn         | A ← A ^ nn                       |
-| `0fff_rrrr`    | ALU reg         | A ← A op mem[0x80+r]             |
-| `8r`           | STORE r         | mem[0x80+r] ← A                  |
-| `D0 aa`        | JMP aa          | PC ← aa                          |
-| `D2 aa`        | BZ  aa          | if A==0: PC ← aa                 |
-| `D3 aa`        | BNZ aa          | if A!=0: PC ← aa                 |
+A comprehensive testbench (`lipsi_tb.v`) is provided to verify processor functionality:
 
-**Register file:** `mem[0x80]`–`mem[0x8F]` = r0–r15 (read/write via ALU reg and STORE).
+- **Simulation environment**: Full-featured testbench with clock generation and reset control
+- **Test coverage**: CPU core, ALU operations, memory access, UART integration
+- **Waveform output**: GTKWave-compatible `.vcd` files for detailed signal analysis
+- **Baud rate validation**: 9600 baud UART at 100 MHz system clock (CLK_PER_BIT = 10416)
+
+### Running Simulation (Vivado)
+
+1. Open your project in Vivado
+2. Add `lipsi_tb.v` as a simulation source
+3. Right-click on `lipsi_tb` and select **Set as Top Module** (for simulation)
+4. Run **Simulation → Run Behavioral Simulation**
+5. Export waveforms as `.vcd` for analysis in GTKWave
 
 ---
 
 ## Building in Vivado
 
 1. Create a new RTL project targeting **xc7a35tcpg236-1** (Basys3)
-2. Add all `.v` files from `src/` as design sources
-3. Set `lipsi_top` as the top module
+2. Add all `.v` files from `src/` as design sources (including uart_rx.v and uart_tx.v)
+3. Set `lipsi_top` (or `top_level_module`) as the top module
 4. Add `lipsi.xdc` as a constraint file
 5. Run Synthesis → Implementation → Generate Bitstream
 6. Program the device
+7. (Optional) Connect USB cable and open PuTTY at 9600 baud to interact via UART
 
 ---
 
-This processor runs **three completely different algorithms** (step counting, Fibonacci, XOR toggling) on the **exact same hardware**, selected purely by the program in memory. The silicon does not change. The program does. That is the definition of a stored-program processor.
+## UART Communication
+
+The processor integrates a full-duplex UART module for serial communication:
+
+- **Baud rate**: 9600 baud (8 data bits, 1 stop bit, no parity)
+- **TX module** (`uart_tx.v`): Transmits accumulator or register values to PC
+- **RX module** (`uart_rx.v`): Receives commands from PC to control processor behavior
+- **Interface**: Connect Basys3 USB port to host PC; use PuTTY or similar terminal at 9600 baud
+- **Pin assignment**: TX (A18), RX (B18) — auto-detected USB-to-UART bridge on Basys3
+
+This enables real-time monitoring and control of the processor over serial connection.

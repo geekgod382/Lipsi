@@ -100,14 +100,14 @@ module lipsi (
                         // 1111 1111            exit          exit for the tester      PC = PC
 
                         // ALU register: 0fff rrrr
-                        8'b0???_????: begin
+                        8'b0xxx_xxxx: begin
                             alu_func <= mem_rd_data[6:4];
                             mem_rd_addr <= {5'b1_0000, mem_rd_data[3:0]};
                             state <= EXEC2;
                         end
 
                         // Store: 1000 rrrr
-                        8'b1000_????: begin
+                        8'b1000_xxxx: begin
                             mem_we <= 1'b1;
                             mem_wr_addr <= {5'b1_0000, mem_rd_data[3:0]};
                             mem_wr_data <= A;
@@ -115,7 +115,7 @@ module lipsi (
                         end
 
                         // ALU immediate: 1100 -fff | nn
-                        8'b1100_????: begin
+                        8'b1100_xxxx: begin
                             alu_func <= mem_rd_data[2:0];
                             mem_rd_addr <= PC;
                             PC <= PC + 1;
@@ -123,28 +123,28 @@ module lipsi (
                         end
 
                         // JMP: 1101 --00 | aa
-                        8'b1101_??00: begin
+                        8'b1101_xx00: begin
                             mem_rd_addr <= PC;
                             PC <= PC + 1;
                             state <= EXEC2;
                         end
 
                         // BZ: 1101 --10 | aa
-                        8'b1101_??10: begin
+                        8'b1101_xx10: begin
                             mem_rd_addr <= PC;
                             PC <= PC + 1;
                             state <= EXEC2;
                         end
 
                         // BNZ: 1101 --11 | aa
-                        8'b1101_??11: begin
+                        8'b1101_xx11: begin
                             mem_rd_addr <= PC;
                             PC <= PC + 1;
                             state <= EXEC2;
                         end
 
                         // IO: 1111 xxxx
-                        8'b1111_????: begin
+                        8'b1111_xxxx: begin
                             case (mem_rd_data[3:0])
                                 4'h0: A <= io_in;
                                 4'h1: io_out <= A;
@@ -167,30 +167,30 @@ module lipsi (
                 EXEC2: begin
                     casez (instr)
 
-                        8'b0???_????: begin
+                        8'b0xxx_xxxx: begin
                             A <= alu_result;
                             carry <= alu_carry;
                             state <= FETCH;
                         end
 
-                        8'b1100_????: begin
+                        8'b1100_xxxx: begin
                             A <= alu_result;
                             carry <= alu_carry;
                             state <= FETCH;
                         end
 
                         // JMP — target byte is 8-bit, zero-extended to 9-bit
-                        8'b1101_??00: begin
+                        8'b1101_xx00: begin
                             PC <= {1'b0, mem_rd_data};
                             state <= FETCH;
                         end
 
-                        8'b1101_??10: begin
+                        8'b1101_xx10: begin
                             if (A == 8'h00) PC <= {1'b0, mem_rd_data};
                             state <= FETCH;
                         end
 
-                        8'b1101_??11: begin
+                        8'b1101_xx11: begin
                             if (A != 8'h00) PC <= {1'b0, mem_rd_data};
                             state <= FETCH;
                         end
